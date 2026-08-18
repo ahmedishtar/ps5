@@ -274,8 +274,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=110"></script>
-<script src="main.js?v=110"></script>
+<script src="rop.js?v=111"></script>
+<script src="main.js?v=111"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -286,21 +286,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=110"></script>
+<script src="syscalls.js?v=111"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=110";
-import { installWindowP, pairStatus } from "./mem.js?v=110";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=111";
+import { installWindowP, pairStatus } from "./mem.js?v=111";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=110";
+    from "./poops.js?v=111";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=110");
+    const lib = await import("./poops.js?v=111");
 
-    await import("./poops.js?v=110");
-    const st = await import("./poops.js?v=110");
+    await import("./poops.js?v=111");
+    const st = await import("./poops.js?v=111");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -1396,7 +1396,16 @@ async function preflight() {
                 try { if (w) w.terminate(); } catch { }
                 resolve(v);
             };
-            const t = setTimeout(() => finish("timeout"), 4000);
+            /* 4000 ms was tuned against the LAN exploit host, where rop_slave.js is a
+                 sub-millisecond fetch. Served from a remote host (GitHub Pages, a private
+                 site) the Worker has to pull its script over the internet - and the probe
+                 fetch above uses cache:"no-store", so it is a cold round trip - which the
+                 console browser routinely exceeds. The probe then reported "timeout" and
+                 p2jb threw "rop_slave.js is not usable" before starting, on EVERY firmware.
+                 Raising the bound is free: this promise resolves the moment onmessage
+                 fires, so a fast local load is unaffected; only the failure case waits
+                 longer. */
+              const t = setTimeout(() => finish("timeout"), 20000);
             try {
                 w = new Worker("rop_slave.js");
                 w.onmessage = () => { clearTimeout(t); finish("ok"); };
@@ -1973,10 +1982,10 @@ async function main() {
             });
             try {
                 if (!window.POOPS) throw new Error("window.POOPS not published by prepare()");
-                await loadScript("rop-worker.js?v=110");   // sync syscall executor (fireSync)
-                await loadScript("p2jb_lk.js?v=110");       // per-fw libkernel_web offsets for rop-worker
-                await loadScript("p2jb_poops.js?v=110");    // Y2JB adapter (sync syscall via rop-worker)
-                await loadScript("p2jb.js?v=110");          // exploit module (unchanged, sync)
+                await loadScript("rop-worker.js?v=111");   // sync syscall executor (fireSync)
+                await loadScript("p2jb_lk.js?v=111");       // per-fw libkernel_web offsets for rop-worker
+                await loadScript("p2jb_poops.js?v=111");    // Y2JB adapter (sync syscall via rop-worker)
+                await loadScript("p2jb.js?v=111");          // exploit module (unchanged, sync)
                 flushMark("P2JB-LOADED", "adapter+module on poopsploit primitives");
             } catch (e) {
                 flushMark("P2JB-LOAD-FAIL", String(e && e.message).slice(0, 100));
