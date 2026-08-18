@@ -1,3 +1,5 @@
+https://soniciso1.github.io/pooP2JB/
+
 # p2jb / poopsploit — PS5 WebKit exploit host
 
 Static site. Open `index.html` on the console browser; it detects the firmware and
