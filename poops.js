@@ -8464,10 +8464,33 @@ export function makePoopsEngine(X) {
     try {
       const name = o.elfName || "elfldr-ps5-1360.elf";
       flushMark("STAGE5-HEAD-PRE", "url=../payloads/" + name);
-      const head = await fetch("payloads/" + name, { method: "HEAD" });
-      const declared = parseInt(head.headers.get("content-length") || "0", 10);
-      if (!(declared > 0)) throw new Error("no content-length for " + name);
-      flushMark("STAGE5-HEAD-OK", "declared=" + declared);
+      let declared = 0;
+      let preBuf = null;
+      try {
+        const head = await fetch("payloads/" + name, { method: "HEAD" });
+        declared = parseInt(head.headers.get("content-length") || "0", 10);
+      } catch (e) {
+        declared = 0;   /* HEAD refused outright - fall through to the GET below */
+      }
+      if (!(declared > 0)) {
+        /* Not every host answers HEAD with a Content-Length: a proxy can drop it, and a
+           chunked response has none at all. Aborting there kills an otherwise healthy run at
+           the very last stage - seen live as "stage 5: could not stage the elfldr: no
+           content-length for elfldr-ps5-1360.elf" with every earlier stage green. The
+           reference implementation never used HEAD at all; it fetched the ELF and took its
+           .length. Do that as a fallback, and keep the bytes so it costs one request. */
+        const r = await fetch("payloads/" + name, { cache: "no-store" });
+        if (!r.ok)
+          throw new Error("no content-length for " + name + " and GET -> HTTP " + r.status);
+        preBuf = new Uint8Array(await r.arrayBuffer());
+        declared = preBuf.length;
+        flushMark("STAGE5-HEAD-FALLBACK", name + "-bytes=" + declared + "-via=GET");
+      }
+      /* Sanity-bound the size before it becomes an mmap length - a bogus Content-Length would
+         otherwise be mapped verbatim. 16 MB is the reference's ceiling, ~40x the real elfldr. */
+      if (!(declared >= 4 && declared <= 0x1000000))
+        throw new Error("implausible size " + declared + " for " + name);
+      flushMark("STAGE5-HEAD-OK", "declared=" + declared + (preBuf ? "-prefetched" : ""));
       const mapped = (declared + PK.PAGE - 1) & ~(PK.PAGE - 1);
       const er = await sys(
         PSYS.MMAP,
@@ -8492,7 +8515,7 @@ export function makePoopsEngine(X) {
         "addr=" + hx(elfBase) + "-size=0x" + mapped.toString(16),
       );
       let head4 = null;
-      const g = await fetchInto("payloads/" + name, (off, chunk) => {
+      const stageChunk = (off, chunk) => {
         if (head4 === null) head4 = chunk.slice(0, 4);
 
         const base = elfBase.add32(off);
@@ -8507,7 +8530,12 @@ export function makePoopsEngine(X) {
               (chunk[i + 3] << 24),
           );
         for (; i < chunk.length; ++i) P.write1(base.add32(i), chunk[i]);
-      });
+      };
+      /* If the Content-Length fallback above already pulled the file, write those bytes
+         instead of fetching it a second time. */
+      const g = preBuf
+        ? (stageChunk(0, preBuf), { total: preBuf.length, streamed: false })
+        : await fetchInto("payloads/" + name, stageChunk);
       if (g.total !== declared)
         throw new Error(
           "size changed mid-fetch: declared " +
