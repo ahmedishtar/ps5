@@ -14,6 +14,10 @@
  */
 
 (async function () {
+    /* `finally` below needs the state and the abort reason, both of which are scoped
+     * inside the try. Hoist references to them rather than widening those scopes. */
+    let S_ref = null;
+    let fatal_err = null;
     try {
         const p2jb_version = "P2JB 2.6 (Y2JB port)";
 
@@ -4205,6 +4209,7 @@
         }
 
         const S = make_state();
+        S_ref = S;
 
         setup_cpu_masks(S);
         setup_worker_sockets(S);
@@ -4402,6 +4407,7 @@
         await ulog("=== p2jb complete ===");
 
     } catch (e) {
+        fatal_err = e;
         try { await log("p2jb FATAL: " + e.message); } catch (_) { }
         try { send_notification("p2jb FAILED: " + e.message); } catch (_) { }
 
@@ -4427,6 +4433,44 @@
                 try { window.syncMark("ABORT-UNSAFE-TEARDOWN", warn); } catch (_) { }
                 try { await log("p2jb: " + warn); } catch (_) { }
                 try { send_notification("p2jb: unsafe to reload\n\nPower-cycle the console."); } catch (_) { }
+            }
+        } catch (_) { }
+    } finally {
+        /* TEARDOWN PANIC GUARD.
+         *
+         * master.pipe_buffer.buffer points at victim_pipe_data - memory that was never
+         * carved out of pipe_map. pipeclose() inlines pipe_free_kmem(), which calls
+         * vm_map_remove(pipe_map, buffer) on it and takes a Fatal trap 12. The page
+         * navigating to the ELF loader closes those fds, so the panic lands *before*
+         * that page appears - which is exactly how it gets reported.
+         *
+         * The success path above already NULLs it. This is the abort path: any throw
+         * between stage5 and there skips that line and leaves the panic armed.
+         *
+         * Idempotent by construction - it re-reads first and only writes a non-zero
+         * value, so a normal completion falls straight through and logs nothing.
+         *
+         * Skipped when the executor is dead: every kernel access goes through it, so a
+         * read would hang rather than fail, and hanging here would be worse than the
+         * panic warning the operator already gets. */
+        try {
+            const wedged = /executor is dead|sync poll timed out/i.test(
+                String((fatal_err && fatal_err.message) || ""));
+            if (S_ref && S_ref.master_pipe_data && !wedged) {
+                const buf_now = S_ref.kread64(S_ref.master_pipe_data + 0x10n);
+                if (buf_now !== 0n) {
+                    S_ref.kwrite64(S_ref.master_pipe_data + 0x10n, 0n);
+                    try {
+                        window.syncMark("TEARDOWN-GUARD",
+                            "master.pipe_buffer.buffer was " + buf_now.toString(16) +
+                            "-NULLd-on-abort-path");
+                    } catch (_) { }
+                    try {
+                        await log("post-jb guard: master.pipe_buffer.buffer was still " +
+                            toHex(buf_now) + " on the abort path - NULL'd it, " +
+                            "close() will no longer vm_map_remove non-pipe memory");
+                    } catch (_) { }
+                }
             }
         } catch (_) { }
     }
