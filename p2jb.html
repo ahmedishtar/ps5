@@ -274,8 +274,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=108"></script>
-<script src="main.js?v=108"></script>
+<script src="rop.js?v=109"></script>
+<script src="main.js?v=109"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -286,21 +286,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=108"></script>
+<script src="syscalls.js?v=109"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=108";
-import { installWindowP, pairStatus } from "./mem.js?v=108";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=109";
+import { installWindowP, pairStatus } from "./mem.js?v=109";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=108";
+    from "./poops.js?v=109";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=108");
+    const lib = await import("./poops.js?v=109");
 
-    await import("./poops.js?v=108");
-    const st = await import("./poops.js?v=108");
+    await import("./poops.js?v=109");
+    const st = await import("./poops.js?v=109");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -719,12 +719,19 @@ function flushQueue(allowSync) {
         return;
     }
     if (!sent) {
-        try {
-            const xhr = new XMLHttpRequest();
-            xhr.open("POST", "t", false);
-            xhr.setRequestHeader("Content-Type", "text/plain");
-            xhr.send(body);
-        } catch { }
+        /* Same hazard as the log/ beacon: on a static host "t" does not exist, a 404 does not
+           throw, and this SYNCHRONOUS POST would block the main thread for a full internet
+           round trip on every flush. Latch it off after the first non-2xx. Separate flag from
+           the log/ latch because they are separate endpoints. */
+        if (!window.__teleOff) {
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", "t", false);
+                xhr.setRequestHeader("Content-Type", "text/plain");
+                xhr.send(body);
+                if (xhr.status && (xhr.status < 200 || xhr.status >= 300)) window.__teleOff = true;
+            } catch (e) { window.__teleOff = true; }
+        }
     }
 }
 
@@ -931,11 +938,29 @@ function flushMark(tag, extra) {
     marksBlocked++;
     const line = beaconLine(tag, extra);
     screenMark(tag, extra);
-    try {
-        const xhr = new XMLHttpRequest();
-        xhr.open("GET", "log/" + encodeURIComponent(line), false);
-        xhr.send();
-    } catch { }
+    /* The beacon endpoint is OPTIONAL. A static host (GitHub Pages) has no log/ route and
+       answers 404 - and a 404 does NOT throw, so the old try/catch never noticed and every
+       single mark kept issuing a SYNCHRONOUS cross-internet XHR. That blocks the main thread
+       for a full round trip per mark, thousands of times per run (one 10.20 run emitted
+       ~16,000 marks in stage 2 alone), while the exploit deliberately retains its poisoned
+       carrier/string graphs so JSC can never GC them. The renderer then dies with "out of
+       memory" - which is exactly why a run that is fine against the LAN host died at
+       ps10_stage5 when served from GitHub Pages.
+       Latch the endpoint off after the first non-2xx or throw. The on-screen log is
+       unaffected, and against a real host (2xx) nothing changes at all.
+       Firmware-independent: this is page transport, not per-firmware offsets. */
+    if (!window.__beaconOff) {
+        try {
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", "log/" + encodeURIComponent(line), false);
+            xhr.send();
+            if (xhr.status && (xhr.status < 200 || xhr.status >= 300)) {
+                window.__beaconOff = true;
+                try { screenMark("BEACON-OFF",
+                    "log/ -> HTTP " + xhr.status + " - server log disabled for this run"); } catch (e) { }
+            }
+        } catch (e) { window.__beaconOff = true; }
+    }
 
     flushQueue(!raceMode);
 }
@@ -1920,10 +1945,10 @@ async function main() {
             });
             try {
                 if (!window.POOPS) throw new Error("window.POOPS not published by prepare()");
-                await loadScript("rop-worker.js?v=108");   // sync syscall executor (fireSync)
-                await loadScript("p2jb_lk.js?v=108");       // per-fw libkernel_web offsets for rop-worker
-                await loadScript("p2jb_poops.js?v=108");    // Y2JB adapter (sync syscall via rop-worker)
-                await loadScript("p2jb.js?v=108");          // exploit module (unchanged, sync)
+                await loadScript("rop-worker.js?v=109");   // sync syscall executor (fireSync)
+                await loadScript("p2jb_lk.js?v=109");       // per-fw libkernel_web offsets for rop-worker
+                await loadScript("p2jb_poops.js?v=109");    // Y2JB adapter (sync syscall via rop-worker)
+                await loadScript("p2jb.js?v=109");          // exploit module (unchanged, sync)
                 flushMark("P2JB-LOADED", "adapter+module on poopsploit primitives");
             } catch (e) {
                 flushMark("P2JB-LOAD-FAIL", String(e && e.message).slice(0, 100));
