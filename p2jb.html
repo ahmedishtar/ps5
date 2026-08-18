@@ -274,8 +274,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=109"></script>
-<script src="main.js?v=109"></script>
+<script src="rop.js?v=110"></script>
+<script src="main.js?v=110"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -286,21 +286,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=109"></script>
+<script src="syscalls.js?v=110"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=109";
-import { installWindowP, pairStatus } from "./mem.js?v=109";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=110";
+import { installWindowP, pairStatus } from "./mem.js?v=110";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=109";
+    from "./poops.js?v=110";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=109");
+    const lib = await import("./poops.js?v=110");
 
-    await import("./poops.js?v=109");
-    const st = await import("./poops.js?v=109");
+    await import("./poops.js?v=110");
+    const st = await import("./poops.js?v=110");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -949,16 +949,44 @@ function flushMark(tag, extra) {
        Latch the endpoint off after the first non-2xx or throw. The on-screen log is
        unaffected, and against a real host (2xx) nothing changes at all.
        Firmware-independent: this is page transport, not per-firmware offsets. */
-    if (!window.__beaconOff) {
+    /* Where do beacons go?
+       Served from the exploit host (manuals.playstation.net -> the LAN box) the log/ route
+       exists, so keep the proven same-origin synchronous XHR - ordering and delivery are
+       guaranteed before the next mark is produced.
+       Served from anywhere else - GitHub Pages, a private site - log/ does not exist there.
+       Rather than lose telemetry, aim the beacon at the exploit host by absolute URL. That
+       hostname still resolves to the host and the console already trusts its certificate
+       (it is how the page itself was served), so there is no mixed-content block. Sent as an
+       image GET: no CORS preflight, no response needed, and crucially ASYNCHRONOUS - the
+       blocking sync XHR across the internet is what OOM-killed the renderer.
+       If that host is not reachable either, the image simply errors and is dropped; the
+       on-screen log is unaffected. Firmware-independent - this is page transport. */
+    var LOG_ORIGIN = (location.hostname === "manuals.playstation.net")
+        ? "" : "https://manuals.playstation.net/document/en/ps5/";
+    if (!LOG_ORIGIN) {
+        if (!window.__beaconOff) {
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.open("GET", "log/" + encodeURIComponent(line), false);
+                xhr.send();
+                if (xhr.status && (xhr.status < 200 || xhr.status >= 300)) {
+                    window.__beaconOff = true;
+                    try { screenMark("BEACON-OFF",
+                        "log/ -> HTTP " + xhr.status + " - server log disabled for this run"); } catch (e) { }
+                }
+            } catch (e) { window.__beaconOff = true; }
+        }
+    } else if (!window.__beaconOff) {
         try {
-            const xhr = new XMLHttpRequest();
-            xhr.open("GET", "log/" + encodeURIComponent(line), false);
-            xhr.send();
-            if (xhr.status && (xhr.status < 200 || xhr.status >= 300)) {
-                window.__beaconOff = true;
-                try { screenMark("BEACON-OFF",
-                    "log/ -> HTTP " + xhr.status + " - server log disabled for this run"); } catch (e) { }
-            }
+            const im = new Image();
+            im.onerror = function () {
+                if (!window.__beaconOff) {
+                    window.__beaconOff = true;
+                    try { screenMark("BEACON-OFF",
+                        "cross-origin log unreachable - server log disabled"); } catch (e) { }
+                }
+            };
+            im.src = LOG_ORIGIN + "log/" + encodeURIComponent(line);
         } catch (e) { window.__beaconOff = true; }
     }
 
@@ -1945,10 +1973,10 @@ async function main() {
             });
             try {
                 if (!window.POOPS) throw new Error("window.POOPS not published by prepare()");
-                await loadScript("rop-worker.js?v=109");   // sync syscall executor (fireSync)
-                await loadScript("p2jb_lk.js?v=109");       // per-fw libkernel_web offsets for rop-worker
-                await loadScript("p2jb_poops.js?v=109");    // Y2JB adapter (sync syscall via rop-worker)
-                await loadScript("p2jb.js?v=109");          // exploit module (unchanged, sync)
+                await loadScript("rop-worker.js?v=110");   // sync syscall executor (fireSync)
+                await loadScript("p2jb_lk.js?v=110");       // per-fw libkernel_web offsets for rop-worker
+                await loadScript("p2jb_poops.js?v=110");    // Y2JB adapter (sync syscall via rop-worker)
+                await loadScript("p2jb.js?v=110");          // exploit module (unchanged, sync)
                 flushMark("P2JB-LOADED", "adapter+module on poopsploit primitives");
             } catch (e) {
                 flushMark("P2JB-LOAD-FAIL", String(e && e.message).slice(0, 100));
