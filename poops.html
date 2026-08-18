@@ -239,8 +239,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=107"></script>
-<script src="main.js?v=107"></script>
+<script src="rop.js?v=108"></script>
+<script src="main.js?v=108"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -251,21 +251,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=107"></script>
+<script src="syscalls.js?v=108"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=107";
-import { installWindowP, pairStatus } from "./mem.js?v=107";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=108";
+import { installWindowP, pairStatus } from "./mem.js?v=108";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=107";
+    from "./poops.js?v=108";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=107");
+    const lib = await import("./poops.js?v=108");
 
-    await import("./poops.js?v=107");
-    const st = await import("./poops.js?v=107");
+    await import("./poops.js?v=108");
+    const st = await import("./poops.js?v=108");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -574,6 +574,28 @@ function sendPayload(a) {
     const say = function (msg, cls) {
         try { if (typeof stage === "function") stage(msg, cls); } catch (e) { }
     };
+    /* Prefer delivering the ELF from INSIDE the console. After the jailbreak the page
+       has syscalls, so poops.js can socket()/connect()/write() to elfldr on
+       127.0.0.1:9021 itself - no server-side helper, so the tiles work on a purely
+       static host such as GitHub Pages. api/payload/<name> stays as the fallback for
+       the case where the direct path is unavailable (menu opened without a jailbreak
+       in this page, or an older poops.js). */
+    if (typeof window.__sendElfDirect === "function") {
+        say("sending " + name + " directly...", "");
+        window.__sendElfDirect(name)
+            .then(function (bytes) {
+                a.className = "payloadTile sent";
+                say("sent " + name + " - " + bytes + " bytes -> console:9021 (direct)", "ok");
+                flushMark("PAYLOAD-RESULT", name + "-ok=1-bytes=" + bytes + "-via=direct");
+            })
+            .catch(function (e) {
+                const why = String((e && e.message) || e).slice(0, 80);
+                a.className = "payloadTile failed";
+                say(name + " FAILED: " + why + "  |  send it yourself:  nc <ps5-ip> 9021 < " + name, "bad");
+                flushMark("PAYLOAD-RESULT", name + "-FAILED-direct-" + why.slice(0, 50));
+            });
+        return;
+    }
     fetch("api/payload/" + encodeURIComponent(name), { method: "POST", body: "" })
         .then(function (r) {
             // A static host has no api/payload/, so it answers 404 (or an HTML error

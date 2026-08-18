@@ -9158,6 +9158,96 @@ export function makePoopsEngine(X) {
     return out;
   }
 
+  /* Deliver an ELF to elfldr on 127.0.0.1:9021 from INSIDE the console, over a real
+     socket opened with syscalls, instead of asking the web server to open that TCP
+     connection for us via api/payload/<name>.
+
+     The server-side helper exists because BROWSER JavaScript has no raw sockets. That is
+     true before the jailbreak - but not after it: from stage 4 onward we have arbitrary
+     syscalls, and stage 5 already fetches an ELF over HTTP and mmaps it. So the page can
+     do the whole job itself: fetch the bytes, socket(), connect(), write(), close().
+
+     Consequence: the tile menu works on ANY host, including a purely static one such as
+     GitHub Pages, with no PHP/Node helper at all. Same sockaddr layout as the ps0
+     elfldr liveness probe above (len=16, AF_INET, port 9021 big-endian, 127.0.0.1). */
+  async function sendElfDirect(name) {
+    const head = await fetch("payloads/" + name, { method: "HEAD" });
+    if (!head.ok) throw new Error("HEAD " + name + " -> " + head.status);
+    const declared = parseInt(head.headers.get("content-length") || "0", 10);
+    if (!(declared > 0)) throw new Error("no content-length for " + name);
+
+    const mapped = (declared + PK.PAGE - 1) & ~(PK.PAGE - 1);
+    const mr = await sys(PSYS.MMAP, i64(0, 0), mapped, PK.PROT_RW,
+                         PK.MAP_ANON_PRIVATE, -1, i64(0, 0));
+    if (mr.failed || isZero64(mr.raw))
+      throw new Error("mmap 0x" + mapped.toString(16) + " failed: " + mr.errText);
+    const buf = mr.raw;
+
+    let first4 = null;
+    const g = await fetchInto("payloads/" + name, (off, chunk) => {
+      if (first4 === null) first4 = chunk.slice(0, 4);
+      const base = buf.add32(off);
+      let i = 0;
+      const n4 = chunk.length & ~3;
+      for (; i < n4; i += 4)
+        P.write4(base.add32(i), chunk[i] | (chunk[i + 1] << 8) |
+                                (chunk[i + 2] << 16) | (chunk[i + 3] << 24));
+      for (; i < chunk.length; ++i) P.write1(base.add32(i), chunk[i]);
+    });
+    if (g.total !== declared)
+      throw new Error("size changed mid-fetch: " + declared + " -> " + g.total);
+    /* elfldr rejects anything that is not an ELF at offset 0, so check before we spend a
+       socket on it - a 404 page fetched as an ELF would otherwise be written verbatim. */
+    if (!first4 || first4[0] !== 0x7f || first4[1] !== 0x45 ||
+        first4[2] !== 0x4c || first4[3] !== 0x46)
+      throw new Error("not an ELF (first4=" + (first4 ? Array.from(first4) : "none") + ")");
+
+    const sr = await sys(PSYS.SOCKET, K.AF_INET, K.SOCK_STREAM, 0);
+    if (sr.failed) throw new Error("socket: " + sr.errText);
+    const fd = sr.s32;
+    track(fd);
+
+    const ar = await sys(PSYS.MMAP, i64(0, 0), PK.PAGE, PK.PROT_RW,
+                         PK.MAP_ANON_PRIVATE, -1, i64(0, 0));
+    if (ar.failed || isZero64(ar.raw)) throw new Error("sockaddr mmap: " + ar.errText);
+    const sa = ar.raw;
+    P.write4(sa, 0x3d230210);            // sin_len=16, sin_family=AF_INET, sin_port=9021 BE
+    P.write4(sa.add32(4), 0x0100007f);   // 127.0.0.1
+    P.write4(sa.add32(8), 0);
+    P.write4(sa.add32(12), 0);
+
+    const cr = await sys(PSYS.CONNECT, fd, sa, 16);
+    if (cr.failed || cr.s32 !== 0) {
+      try { await sys(PSYS.CLOSE, fd); } catch (e) { }
+      throw new Error("connect(127.0.0.1:9021): " + cr.errText +
+                      " - is elfldr running?");
+    }
+
+    /* write() on a socket is allowed to return short, so loop until the whole image is
+       out. Chunked so a huge payload (etaHEN is ~4.7 MB) never sits in one giant call. */
+    let sent = 0;
+    while (sent < declared) {
+      const want = Math.min(0x40000, declared - sent);
+      const wr = await sys(PSYS.WRITE, fd, buf.add32(sent), want);
+      if (wr.failed) {
+        try { await sys(PSYS.CLOSE, fd); } catch (e) { }
+        throw new Error("write at " + sent + ": " + wr.errText);
+      }
+      const got = wr.s32 | 0;
+      if (got <= 0) {
+        try { await sys(PSYS.CLOSE, fd); } catch (e) { }
+        throw new Error("write returned " + got + " at " + sent);
+      }
+      sent += got;
+    }
+    await sys(PSYS.CLOSE, fd);
+    untrack(fd);
+    flushMark("PAYLOAD-DIRECT", name + "-ok=1-bytes=" + sent);
+    return sent;
+  }
+  /* Handed to the page so the static tile menu can call it without importing the module. */
+  try { window.__sendElfDirect = sendElfDirect; } catch (e) { }
+
   return {
     PK,
     PSYS,
