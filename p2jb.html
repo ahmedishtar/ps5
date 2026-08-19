@@ -282,8 +282,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=122"></script>
-<script src="main.js?v=122"></script>
+<script src="rop.js?v=123"></script>
+<script src="main.js?v=123"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -294,21 +294,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=122"></script>
+<script src="syscalls.js?v=123"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=122";
-import { installWindowP, pairStatus } from "./mem.js?v=122";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=123";
+import { installWindowP, pairStatus } from "./mem.js?v=123";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=122";
+    from "./poops.js?v=123";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=122");
+    const lib = await import("./poops.js?v=123");
 
-    await import("./poops.js?v=122");
-    const st = await import("./poops.js?v=122");
+    await import("./poops.js?v=123");
+    const st = await import("./poops.js?v=123");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -810,9 +810,41 @@ window.liveStatus = (function () {
         return el;
     }
 
+
+    /* "DO NOT TURN OFF" BANNER.
+       From the drain onward the exploit holds the JS thread in tight loops, so the 1 Hz
+       repaint above cannot run and the clock visibly stalls for stretches. That is normal,
+       but a frozen-looking screen ~45 minutes into a run is exactly when someone reaches
+       for the power button - and pulling power here throws away the whole leak.
+       The banner appears once the leak is done and stays up until the payload menu
+       replaces the run UI (showPayloadMenu hides every body child except the menu, so it
+       clears itself without any extra bookkeeping). */
+    var warnEl = null;
+    function ensureWarn() {
+        if (warnEl) return warnEl;
+        warnEl = document.createElement("div");
+        warnEl.id = "nokill";
+        warnEl.style.cssText =
+            "margin:8px 0;padding:10px 12px;border:2px solid #b3261e;border-radius:8px;"
+            + "background:#2a0f0f;color:#ff6b6b;text-align:center;letter-spacing:.03em;"
+            + "font:700 16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif";
+        warnEl.textContent = "DO NOT TURN OFF OR RESTART - WAIT UNTIL ELFLDR BEGINS";
+        var line2 = document.createElement("div");
+        line2.style.cssText = "margin-top:4px;color:#e0a0a0;font:400 13px/1.4 system-ui,sans-serif";
+        line2.textContent = "the clock may stop moving for a while here - that is normal";
+        warnEl.appendChild(line2);
+        var e = ensureEl();
+        if (e && e.parentNode) e.parentNode.insertBefore(warnEl, e.nextSibling);
+        return warnEl;
+    }
+    var WARN_FROM = ORDER.indexOf("drain");
+
     function render() {
         try {
             if (!el) return;
+            try {
+                if (WARN_FROM >= 0 && ORDER.indexOf(key) >= WARN_FROM) ensureWarn();
+            } catch (e) { }
             var now = Date.now();
             var phaseSecs = (now - t0) / 1000;
             var runSecs = (now - RUN_T0) / 1000;
@@ -2045,10 +2077,10 @@ async function main() {
             });
             try {
                 if (!window.POOPS) throw new Error("window.POOPS not published by prepare()");
-                await loadScript("rop-worker.js?v=122");   // sync syscall executor (fireSync)
-                await loadScript("p2jb_lk.js?v=122");       // per-fw libkernel_web offsets for rop-worker
-                await loadScript("p2jb_poops.js?v=122");    // Y2JB adapter (sync syscall via rop-worker)
-                await loadScript("p2jb.js?v=122");          // exploit module (unchanged, sync)
+                await loadScript("rop-worker.js?v=123");   // sync syscall executor (fireSync)
+                await loadScript("p2jb_lk.js?v=123");       // per-fw libkernel_web offsets for rop-worker
+                await loadScript("p2jb_poops.js?v=123");    // Y2JB adapter (sync syscall via rop-worker)
+                await loadScript("p2jb.js?v=123");          // exploit module (unchanged, sync)
                 flushMark("P2JB-LOADED", "adapter+module on poopsploit primitives");
             } catch (e) {
                 /* This reported ONLY through flushMark. Served from a static host there is no
