@@ -18,6 +18,38 @@ Serve the directory. No build step. Works at a domain root **or in a subdirector
 `.nojekyll` is required and present — without it Pages runs Jekyll, which silently
 drops files and directories whose names begin with `_`.
 
+### Docker / VPS
+
+The repository includes a container for `api/serve.js`. It serves the static site and
+implements `POST /api/payload/<name>`, which writes the selected ELF to `elfldr` over a
+raw TCP connection.
+
+```sh
+cp .env.example .env
+docker compose up -d --build
+docker compose logs -f
+```
+
+The site is exposed on port `8080` by default. Check it with:
+
+```sh
+curl http://127.0.0.1:8080/healthz
+```
+
+Environment variables:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `HTTP_PORT` | `8080` | Host/VPS port published by Compose |
+| `ELFLDR_PORT` | `9021` | `elfldr` TCP port on the console |
+| `PS5_HOST` | request source IP | Console address reachable from the container |
+
+**VPS/NAT warning:** a public VPS normally cannot connect to a PS5 behind a residential
+NAT. `PS5_HOST` must resolve to an address reachable from the container. Prefer a private
+VPN route between the VPS and your home network; otherwise you need a carefully scoped
+TCP port-forward for `9021`. If a CDN or reverse proxy sits in front of the container,
+the request source may be the proxy, so configure `PS5_HOST` explicitly.
+
 ## What does NOT work on GitHub Pages
 
 **The ELF tile menu cannot deliver payloads from a static host.** Delivering an ELF
