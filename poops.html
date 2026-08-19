@@ -591,7 +591,7 @@ function sendPayload(a) {
        in this page, or an older poops.js). */
     if (typeof window.__sendElfDirect === "function") {
         say("sending " + name + " directly...", "");
-        window.__sendElfDirect(name)
+        return window.__sendElfDirect(name)
             .then(function (bytes) {
                 a.className = "payloadTile sent";
                 say("sent " + name + " - " + bytes + " bytes -> console:9021 (direct)", "ok");
@@ -605,7 +605,7 @@ function sendPayload(a) {
             });
         return;
     }
-    fetch("api/payload/" + encodeURIComponent(name), { method: "POST", body: "" })
+    return fetch("api/payload/" + encodeURIComponent(name), { method: "POST", body: "" })
         .then(function (r) {
             // A static host has no api/payload/, so it answers 404 (or an HTML error
             // page). Catch that here rather than letting r.json() throw a parser error
@@ -630,7 +630,7 @@ function sendPayload(a) {
 }
 
 let payloadManagerAutoloadStarted = false;
-function autoloadPayloadManager() {
+async function autoloadPayloadManager() {
     if (payloadManagerAutoloadStarted || /[?&]noautoload=1(?:&|$)/i.test(location.search))
         return;
     payloadManagerAutoloadStarted = true;
@@ -640,7 +640,7 @@ function autoloadPayloadManager() {
         return;
     }
     flushMark("PAYLOAD-AUTOLOAD", "pldmgr.elf-start");
-    sendPayload(tile);
+    return sendPayload(tile);
 }
 
 window.showWin = showWin;
@@ -713,10 +713,8 @@ function flushMark(tag, extra) {
     if (!window.__won && tag === "STAGE5-DONE") {
         const e = extra || "";
         const jr = /(?:^|[\s-])joinRet=(?:0x)?([0-9a-fA-F]+)/.exec(e);
-        if (!jr || parseInt(jr[1], 16) === 0) {
+        if (!jr || parseInt(jr[1], 16) === 0)
             showWin();
-            autoloadPayloadManager();
-        }
     }
 
     if (raceMode && CRITICAL_MARKS[tag] !== 1) { queueEvent(tag, extra); return; }
@@ -1613,6 +1611,16 @@ async function runLadder() {
         chainDead: chainDead, cleanupFailed: state.cleanupFailed,
         latchDetail: (finalLatch && finalLatch.detail) || ""
     }));
+
+    // STAGE5-DONE may arrive before the forced report/cleanup row. Wait until the
+    // complete ladder, fd sweep, verdict, latch bookkeeping, and runlog are finished
+    // before allowing the payload sender to share this executor.
+    if (window.__won && engine && engine.S.jailbroken && engine.S.aliasesRepaired
+        && !chainDead && !state.cleanupFailed) {
+        await autoloadPayloadManager();
+    } else if (window.__won) {
+        flushMark("PAYLOAD-AUTOLOAD", "skipped-unsafe-post-jailbreak-state");
+    }
 
     if (mustReboot)
         stage("reboot required -- " + passed + " PASS / " + failed + " FAIL", "bad");

@@ -26,8 +26,10 @@ After the jailbreak, the exploit page has native syscall access and can open a r
 socket to the console's `elfldr` on `127.0.0.1:9021`. The payload menu therefore works
 from a static host such as GitHub Pages without PHP or Node.
 
-P2JB and Poopsploit automatically send `payloads/pldmgr.elf` after starting `elfldr`. The sender
-retries the connection for up to 10 seconds so it does not race the listener startup.
+P2JB and Poopsploit automatically send `payloads/pldmgr.elf` after starting `elfldr`.
+The sender waits 1.5 seconds without touching the fd table and then makes one connection
+attempt. A failure falls back to the payload menu instead of opening and closing sockets
+in a retry loop inside the post-UAF process.
 Use `?noautoload=1` to keep the jailbreak and payload menu but disable that automatic
 send for troubleshooting.
 
