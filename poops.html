@@ -266,15 +266,15 @@ otherwise.</div>
 import { installWindowP, pairStatus } from "./mem.js?v=116";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=116";
+    from "./poops.js?v=117";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=116");
+    const lib = await import("./poops.js?v=117");
 
-    await import("./poops.js?v=116");
-    const st = await import("./poops.js?v=116");
+    await import("./poops.js?v=117");
+    const st = await import("./poops.js?v=117");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -626,7 +626,21 @@ function sendPayload(a) {
             a.className = "payloadTile failed";
             say(name + " FAILED: " + why + "  |  send it yourself:  nc <ps5-ip> 9021 < " + name, "bad");
             flushMark("PAYLOAD-RESULT", name + "-FAILED-" + why.slice(0, 60));
-        });
+    });
+}
+
+let payloadManagerAutoloadStarted = false;
+function autoloadPayloadManager() {
+    if (payloadManagerAutoloadStarted || /[?&]noautoload=1(?:&|$)/i.test(location.search))
+        return;
+    payloadManagerAutoloadStarted = true;
+    const tile = document.querySelector('.payloadTile[data-name="pldmgr.elf"]');
+    if (!tile) {
+        flushMark("PAYLOAD-AUTOLOAD", "pldmgr.elf-tile-missing");
+        return;
+    }
+    flushMark("PAYLOAD-AUTOLOAD", "pldmgr.elf-start");
+    sendPayload(tile);
 }
 
 window.showWin = showWin;
@@ -699,8 +713,10 @@ function flushMark(tag, extra) {
     if (!window.__won && tag === "STAGE5-DONE") {
         const e = extra || "";
         const jr = /(?:^|[\s-])joinRet=(?:0x)?([0-9a-fA-F]+)/.exec(e);
-        if (!jr || parseInt(jr[1], 16) === 0)
+        if (!jr || parseInt(jr[1], 16) === 0) {
             showWin();
+            autoloadPayloadManager();
+        }
     }
 
     if (raceMode && CRITICAL_MARKS[tag] !== 1) { queueEvent(tag, extra); return; }

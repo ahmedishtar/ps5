@@ -9267,11 +9267,6 @@ export function makePoopsEngine(X) {
         first4[2] !== 0x4c || first4[3] !== 0x46)
       throw new Error("not an ELF (first4=" + (first4 ? Array.from(first4) : "none") + ")");
 
-    const sr = await sys(PSYS.SOCKET, K.AF_INET, K.SOCK_STREAM, 0);
-    if (sr.failed) throw new Error("socket: " + sr.errText);
-    const fd = sr.s32;
-    track(fd);
-
     const ar = await sys(PSYS.MMAP, i64(0, 0), PK.PAGE, PK.PROT_RW,
                          PK.MAP_ANON_PRIVATE, -1, i64(0, 0));
     if (ar.failed || isZero64(ar.raw)) throw new Error("sockaddr mmap: " + ar.errText);
@@ -9281,12 +9276,38 @@ export function makePoopsEngine(X) {
     P.write4(sa.add32(8), 0);
     P.write4(sa.add32(12), 0);
 
-    const cr = await sys(PSYS.CONNECT, fd, sa, 16);
-    if (cr.failed || cr.s32 !== 0) {
-      try { await sys(PSYS.CLOSE, fd); } catch (e) { }
-      throw new Error("connect(127.0.0.1:9021): " + cr.errText +
-                      " - is elfldr running?");
+    /* kexp returning only means the elfldr thread was launched; its listen socket may
+       still be coming up. A single immediate connect made both manual clicks and the
+       P2JB autoload race that startup. Retry with a fresh socket because a refused TCP
+       socket is not reusable. */
+    const connectDeadline = Date.now() + 10000;
+    let fd = -1;
+    let connectWhy = "not attempted";
+    let attempts = 0;
+    while (Date.now() < connectDeadline) {
+      attempts++;
+      const sr = await sys(PSYS.SOCKET, K.AF_INET, K.SOCK_STREAM, 0);
+      if (sr.failed) {
+        connectWhy = "socket: " + sr.errText;
+      } else {
+        const candidate = sr.s32;
+        track(candidate);
+        const cr = await sys(PSYS.CONNECT, candidate, sa, 16);
+        if (!cr.failed && cr.s32 === 0) {
+          fd = candidate;
+          break;
+        }
+        connectWhy = cr.errText;
+        try { await sys(PSYS.CLOSE, candidate); } catch (e) { }
+        untrack(candidate);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
+    if (fd < 0) {
+      throw new Error("connect(127.0.0.1:9021) timed out after " + attempts +
+                      " attempts: " + connectWhy);
+    }
+    flushMark("PAYLOAD-ELFLDR-UP", "attempts=" + attempts);
 
     /* write() on a socket is allowed to return short, so loop until the whole image is
        out. Chunked so a huge payload (etaHEN is ~4.7 MB) never sits in one giant call. */

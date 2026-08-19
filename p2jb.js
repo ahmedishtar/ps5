@@ -4148,6 +4148,32 @@
             }
         }
 
+        let payload_manager_autoload_started = false;
+        async function autoload_payload_manager() {
+            if (payload_manager_autoload_started) {
+                await ulog("autoload: pldmgr.elf already requested - skipping duplicate");
+                return;
+            }
+            if (/[?&]noautoload=1(?:&|$)/i.test(String(location.search || ""))) {
+                await ulog("autoload: disabled by ?noautoload=1");
+                return;
+            }
+            payload_manager_autoload_started = true;
+            try {
+                if (typeof window.__sendElfDirect !== "function")
+                    throw new Error("__sendElfDirect is unavailable");
+                await ulog("autoload: waiting for elfldr and sending pldmgr.elf");
+                const bytes = await window.__sendElfDirect("pldmgr.elf");
+                await ulog("autoload: pldmgr.elf sent successfully (" + bytes + " bytes)");
+                send_notification("Payload Manager sent\n" + bytes + " bytes written");
+            } catch (e) {
+                const why = String((e && e.message) || e).slice(0, 160);
+                await ulog("autoload: pldmgr.elf failed: " + why +
+                    " (jailbreak remains complete; use the payload menu to retry)");
+                send_notification("Jailbreak complete\nPayload Manager failed\n" + why);
+            }
+        }
+
         // stage_load_elf_via_kexp() (the Y2JB >=1.5 `load_aioshellcode` handoff) was
         // DELETED here. load_aioshellcode is a Y2JB host function that has never been in
         // scope in this runtime, so the function could only ever log and return - and its
@@ -4289,6 +4315,7 @@
         // loader whose payload_args ABI 12.00 does not use. We serve the payloads ourselves
         // and run the contract poops proved on this firmware, so there is one path.
         await stage_load_elf_via_kexp_shellcode(S);
+        await autoload_payload_manager();
 
         try {
             const B = S.proc_ucred;

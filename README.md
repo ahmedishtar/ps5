@@ -20,26 +20,30 @@ Serve the directory. No build step. Works at a domain root **or in a subdirector
 `.nojekyll` is required and present — without it Pages runs Jekyll, which silently
 drops files and directories whose names begin with `_`.
 
-## What does NOT work on GitHub Pages
+## Payload delivery on GitHub Pages
 
-**The ELF tile menu cannot deliver payloads from a static host.** Delivering an ELF
-needs a real TCP socket to the console's `elfldr` on port 9021: JavaScript has no raw
-sockets, and an HTTP POST to :9021 would prepend HTTP headers so `elfldr` would not see
-`\x7fELF` at offset 0. The page therefore asks a server-side endpoint,
-`api/payload/<name>`, to open that connection — and Pages cannot run one.
+After the jailbreak, the exploit page has native syscall access and can open a real TCP
+socket to the console's `elfldr` on `127.0.0.1:9021`. The payload menu therefore works
+from a static host such as GitHub Pages without PHP or Node.
 
-Everything else works. The exploit still runs, still jailbreaks, and `elfldr` still
-comes up on :9021. Send ELFs yourself:
+P2JB and Poopsploit automatically send `payloads/pldmgr.elf` after starting `elfldr`. The sender
+retries the connection for up to 10 seconds so it does not race the listener startup.
+Use `?noautoload=1` to keep the jailbreak and payload menu but disable that automatic
+send for troubleshooting.
+
+If direct delivery fails, the menu reports the reason and you can still send an ELF
+from another machine:
 
 ```
 nc <ps5-ip> 9021 < payloads/etaHEN.elf
 ```
 
 A tile that cannot deliver outlines red and prints the reason plus the `nc` command,
-rather than silently doing nothing.
+rather than silently doing nothing. A successful tile outlines green.
 
-Ready-made handlers ship in `api/` (`payload.php` + `.htaccess`, and `serve.js`) for
-any host that can run PHP or Node. On Pages they are inert.
+Ready-made fallback handlers remain in `api/` (`payload.php` + `.htaccess`, and
+`serve.js`) for hosts that can run PHP or Node. On Pages they are inert and normally
+unnecessary because the direct sender is preferred.
 
 The other endpoints degrade safely: the one-shot latch falls back to `localStorage`
 (which survives a reboot and a WebProcess crash, exactly when the guard matters),
