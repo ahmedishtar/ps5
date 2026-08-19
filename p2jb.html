@@ -282,8 +282,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=118"></script>
-<script src="main.js?v=118"></script>
+<script src="rop.js?v=122"></script>
+<script src="main.js?v=122"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -294,21 +294,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=118"></script>
+<script src="syscalls.js?v=122"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=118";
-import { installWindowP, pairStatus } from "./mem.js?v=118";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=122";
+import { installWindowP, pairStatus } from "./mem.js?v=122";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=118";
+    from "./poops.js?v=122";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=118");
+    const lib = await import("./poops.js?v=122");
 
-    await import("./poops.js?v=118");
-    const st = await import("./poops.js?v=118");
+    await import("./poops.js?v=122");
+    const st = await import("./poops.js?v=122");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -651,6 +651,12 @@ function sendPayload(a) {
        static host such as GitHub Pages. api/payload/<name> stays as the fallback for
        the case where the direct path is unavailable (menu opened without a jailbreak
        in this page, or an older poops.js). */
+    /* DIAGNOSTIC: record which delivery path this click takes, and why. */
+    try {
+        flushMark("ELFDIRECT-PROBE", name
+            + "-typeof=" + (typeof window.__sendElfDirect)
+            + "-origin=" + String(location.origin || "?").replace(/[^A-Za-z0-9.:_-]/g, "_"));
+    } catch (e) { }
     if (typeof window.__sendElfDirect === "function") {
         say("sending " + name + " directly...", "");
         window.__sendElfDirect(name)
@@ -1535,6 +1541,51 @@ let LADDER = [];
 let currentKey = "";
 let ctx = null;
 
+
+/* WEBKIT-ONLY SENDER.
+ *
+ * The payload menu can be reached without running the exploit in this page - via
+ * ?payloads=1, or a jailbreak recorded earlier in this browser session. Those paths
+ * called showWin() immediately, so the page had no WebKit primitive and therefore no
+ * syscalls, and window.__sendElfDirect (exported inside makePoopsEngine) was never
+ * defined. Measured on a live run:
+ *
+ *     ELFDIRECT-PROBE <name> typeof=undefined
+ *     PAYLOAD-RESULT  FAILED - server reported failure
+ *
+ * Every ELF ever delivered went through api/payload/ instead, which exists only on
+ * ps-exploit-host and ps5dbg. GitHub Pages has no such route, so on a static host the
+ * tiles could not work at all.
+ *
+ * Bringing up the primitive and the engine (NOT the kernel exploit) is enough: the
+ * sender needs only socket/connect/write/mmap, which the ROP chain provides. Same split
+ * zecoxao/slopdev exposes as its "Webkit-only (sender)" button.
+ *
+ * Firmware-agnostic: it runs the same boot path a normal run uses, so it covers every
+ * firmware the page already supports - poopsploit 9.00-12.00 and p2jb 12.00-12.70.
+ *
+ * Failure is not fatal - the menu still opens and falls back to api/payload, which is
+ * exactly today's behaviour.
+ */
+async function wkOnlySender(why) {
+    try {
+        stage("payload menu (" + why + ") -- bringing up the WebKit primitive so the console can send ELFs itself");
+        flushMark("WK-ONLY-SENDER", "begin-why=" + why);
+        await bootChain();
+        makeContext();
+        const ok = (typeof window.__sendElfDirect === "function");
+        flushMark("WK-ONLY-SENDER", "ready typeof=" + (typeof window.__sendElfDirect)
+            + "-direct=" + ok);
+        stage(ok ? "in-console sender ready -- tiles work without a server helper"
+                 : "sender unavailable -- tiles will use the server helper", ok ? "ok" : "");
+    } catch (e) {
+        const w = String((e && e.message) || e).slice(0, 120);
+        flushMark("WK-ONLY-SENDER", "FAILED-" + w.slice(0, 80));
+        try { stage("primitive setup failed (" + w + ") -- menu will use the server helper", "bad"); } catch (_) { }
+    }
+    showWin();
+}
+
 function makeContext() {
     ctx = {
         P, chain, i64: (lo, hi) => new int64(lo, hi),
@@ -1994,10 +2045,10 @@ async function main() {
             });
             try {
                 if (!window.POOPS) throw new Error("window.POOPS not published by prepare()");
-                await loadScript("rop-worker.js?v=118");   // sync syscall executor (fireSync)
-                await loadScript("p2jb_lk.js?v=118");       // per-fw libkernel_web offsets for rop-worker
-                await loadScript("p2jb_poops.js?v=118");    // Y2JB adapter (sync syscall via rop-worker)
-                await loadScript("p2jb.js?v=118");          // exploit module (unchanged, sync)
+                await loadScript("rop-worker.js?v=122");   // sync syscall executor (fireSync)
+                await loadScript("p2jb_lk.js?v=122");       // per-fw libkernel_web offsets for rop-worker
+                await loadScript("p2jb_poops.js?v=122");    // Y2JB adapter (sync syscall via rop-worker)
+                await loadScript("p2jb.js?v=122");          // exploit module (unchanged, sync)
                 flushMark("P2JB-LOADED", "adapter+module on poopsploit primitives");
             } catch (e) {
                 /* This reported ONLY through flushMark. Served from a static host there is no
@@ -2188,13 +2239,13 @@ function lastRunText() {
     const jb = jbRead();
     if (PAYLOADS_ONLY) {
         stage("payload menu requested -- skipping the exploit");
-        showWin();
+        await wkOnlySender("requested");
         return;
     }
     if (jb.session && !FORCE_RUN) {
         // Same browser session, so the console cannot have rebooted: certain.
         stage("already jailbroken this session -- payload menu (skipping the exploit)");
-        showWin();
+        await wkOnlySender("session");
         return;
     }
     // NOTE: the durable localStorage marker deliberately does NOT stop the run.
