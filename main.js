@@ -177,6 +177,21 @@ async function prepare(p) {
                 ? "0x" + globalThis.__ps5NativeCtor.toString(16) : "absent")
             + "-hc=" + (typeof OFFSET_wk_host_constructor_candidates !== "undefined"
                 ? OFFSET_wk_host_constructor_candidates.length : "none"));
+        /* The vtable fallback is legacy for pre-9.00. On 9.00+ core.js always sets
+           __ps5NativeCtor before prepare() runs, so this branch is unreachable in
+           practice - it has fired 0 times in 81 recorded runs.
+
+           It matters anyway: offsets/12.02 .. 12.70 carry
+               const OFFSET_wk_vtable_first_element = 0;  // needs a console
+           and subtracting 0 yields the raw first-vtable-entry pointer as if it were
+           the module base. Every gadget and syscall is then derived from a wrong
+           base and the page dies with no usable message. Refuse instead: a loud
+           failure here is worth far more than a plausible wrong number. */
+        if (!OFFSET_wk_vtable_first_element) {
+            throw new Error("fw " + window.fw_str + " has no OFFSET_wk_vtable_first_element"
+                + " and __ps5NativeCtor was absent - cannot resolve the WebKit base."
+                + " (Reload; if this repeats the host-constructor path is broken.)");
+        }
         libSceNKWebKitBase = p.read8(textAreaVtable).sub32(OFFSET_wk_vtable_first_element);
     }
 
@@ -1225,4 +1240,4 @@ async function main(userlandRW, wkOnly = false) {
 let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
-fwScript.setAttribute('src', `offsets/${window.fw_str}.js?v=16`);
+fwScript.setAttribute('src', `offsets/${window.fw_str}.js?v=17`);
