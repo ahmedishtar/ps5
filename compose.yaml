@@ -1,0 +1,15 @@
+services:
+  poop2jb:
+    build:
+      context: .
+    image: poop2jb:local
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
