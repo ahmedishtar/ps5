@@ -282,8 +282,8 @@ otherwise.</div>
      at ?v=77 while it was edited, and the console kept running the stale copy - the
      fix looked applied on disk and was invisible on hardware. rop.js/syscalls.js had
      NO ?v= at all, which is the same trap with no warning. -->
-<script src="rop.js?v=129"></script>
-<script src="main.js?v=129"></script>
+<script src="rop.js?v=130"></script>
+<script src="main.js?v=130"></script>
 <script>window.offsetsReady = new Promise(function (res, rej) {
     var s = document.querySelector('script[src^="offsets/"]');
     if (!s) return rej(new Error("offsets script was never injected by main.js"));
@@ -294,21 +294,21 @@ otherwise.</div>
     });
 });
 </script>
-<script src="syscalls.js?v=129"></script>
+<script src="syscalls.js?v=130"></script>
 
-<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=129";
-import { installWindowP, pairStatus } from "./mem.js?v=129";
+<script type="module">import { establishPrimitive, fakeCellReleased } from "./core.js?v=130";
+import { installWindowP, pairStatus } from "./mem.js?v=130";
 import { int64 } from "./int64.js";
 import { BANNED, ERRNO, K, r32, r16, w32, hexBytes, coreList }
-    from "./poops.js?v=129";
+    from "./poops.js?v=130";
 
 let PK = null, makePoopsEngine = null, buildLadder = null;
 
 async function loadPoopsModules() {
-    const lib = await import("./poops.js?v=129");
+    const lib = await import("./poops.js?v=130");
 
-    await import("./poops.js?v=129");
-    const st = await import("./poops.js?v=129");
+    await import("./poops.js?v=130");
+    const st = await import("./poops.js?v=130");
     PK = lib.PK;
     makePoopsEngine = lib.makePoopsEngine;
     buildLadder = st.buildLadder;
@@ -1923,6 +1923,51 @@ async function runLadder() {
             + passed + " PASS", "ok");
 }
 
+/* MODULE VERSION SPLIT DETECTOR.
+ *
+ * ES modules are keyed by URL, so core.js?v=130 and core.js?v=130 are TWO instances with
+ * separate state. This has broken the site three times: a console holding a cached page at
+ * the old key imports the old core.js while a freshly fetched mem.js imports the new one,
+ * and the run then fails in a way that reads as an exploit problem - mem.js seeing
+ * rwOriginalVector as NaN, or a stall before the primitive comes up - rather than as the
+ * cache problem it is. Resource Timing lists every fetch the page made, so the split is
+ * directly observable. Say so, instead of letting the run die obscurely.
+ *
+ * Detection only. It cannot fire unless the SAME file name was really fetched at two
+ * different ?v= values, it is feature-detected, and any error inside it is ignored.
+ */
+function findVersionSplit() {
+    try {
+        if (typeof performance !== "object" || !performance
+            || typeof performance.getEntriesByType !== "function") return null;
+        const entries = performance.getEntriesByType("resource") || [];
+        const seen = new Map();
+        for (let i = 0; i < entries.length; i++) {
+            const m = /\/([A-Za-z0-9_.-]+\.js)\?v=(\d+)/.exec(String(entries[i].name || ""));
+            if (!m) continue;
+            let vs = seen.get(m[1]);
+            if (!vs) { vs = new Set(); seen.set(m[1], vs); }
+            vs.add(m[2]);
+        }
+        const split = [];
+        seen.forEach(function (vs, file) {
+            if (vs.size > 1)
+                split.push(file + " at v=" + Array.from(vs).sort().join(" and v="));
+        });
+        return split.length ? split.join(", ") : null;
+    } catch (e) { return null; }
+}
+
+function assertNoVersionSplit() {
+    const split = findVersionSplit();
+    if (!split) return;
+    try { flushMark("VERSION-SPLIT", String(split).slice(0, 160)); } catch (e) { }
+    try { stage("cached module version split -- " + split, "bad"); } catch (e) { }
+    throw new Error("module version split (" + split + "). This console is running a cached"
+        + " copy of an older build alongside the new one. Back fully out of the browser and"
+        + " reopen the page so every module is fetched at the same v=.");
+}
+
 async function bootChain() {
     const bootTimer = setTimeout(() => {
         flushMark("BOOT-STALLED", "ms=45000-stage=boot-nothing-changed-yet");
@@ -1930,6 +1975,7 @@ async function bootChain() {
     }, 45000);
     try {
         stage("preflight");
+        assertNoVersionSplit();
         await preflight();
         refuseReferenceChain();
         await bootPrimitiveAndChain();
@@ -2077,10 +2123,10 @@ async function main() {
             });
             try {
                 if (!window.POOPS) throw new Error("window.POOPS not published by prepare()");
-                await loadScript("rop-worker.js?v=129");   // sync syscall executor (fireSync)
-                await loadScript("p2jb_lk.js?v=129");       // per-fw libkernel_web offsets for rop-worker
-                await loadScript("p2jb_poops.js?v=129");    // Y2JB adapter (sync syscall via rop-worker)
-                await loadScript("p2jb.js?v=129");          // exploit module (unchanged, sync)
+                await loadScript("rop-worker.js?v=130");   // sync syscall executor (fireSync)
+                await loadScript("p2jb_lk.js?v=130");       // per-fw libkernel_web offsets for rop-worker
+                await loadScript("p2jb_poops.js?v=130");    // Y2JB adapter (sync syscall via rop-worker)
+                await loadScript("p2jb.js?v=130");          // exploit module (unchanged, sync)
                 flushMark("P2JB-LOADED", "adapter+module on poopsploit primitives");
             } catch (e) {
                 /* This reported ONLY through flushMark. Served from a static host there is no
