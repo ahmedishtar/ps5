@@ -58,7 +58,7 @@
         // to act on. Emit it up front, with the actual query string.
         try {
             window.syncMark("FLAGS", "burn=" + _burn + " skipleak=" + _skipleak
-                + " rc=" + _rc + " v=130"
+                + " rc=" + _rc + " v=131"
                 // MUST mirror kexp_launch's own choice or this beacon lies. It did:
                 // v103 flipped the default to pthread and this line was left inverted
                 // from v99, so the run that finally worked reported spawn=thr_new while
@@ -296,15 +296,6 @@
                 DATA_BASE_TARGET_ID: fw.DATA_BASE_SECURITY_FLAGS ? fw.DATA_BASE_SECURITY_FLAGS + 0x09n : null,
                 DATA_BASE_QA_FLAGS: fw.DATA_BASE_SECURITY_FLAGS ? fw.DATA_BASE_SECURITY_FLAGS + 0x24n : null,
                 DATA_BASE_UTOKEN_FLAGS: fw.DATA_BASE_SECURITY_FLAGS ? fw.DATA_BASE_SECURITY_FLAGS + 0x8Cn : null,
-                // Does THIS firmware have its own RE'd kernel profile, or is it borrowing
-                // another minor's through FW_ALIAS_P2JB? Ten of them borrow:
-                // 9.20/9.40/9.60 -> 9.05, 10.01/10.20/10.40/10.60 -> 10.00,
-                // 11.20/11.40/11.60 -> 11.00. The 12.02-12.70 aliases are safe because every
-                // 12.x profile carries identical values, but the 9.x pair proves these
-                // offsets do move between minors: 9.00 is 0xD72064 and 9.05 is 0xD73064.
-                // Recorded so the kernel-data writes can check themselves before writing.
-                OFFSETS_BORROWED: !Object.prototype.hasOwnProperty.call(FW_OFFSETS_P2JB, FW_VERSION),
-                OFFSETS_SOURCE: key,
             };
         }
 
@@ -3397,47 +3388,6 @@
                 const tid_addr = S.data_base + O.DATA_BASE_TARGET_ID;
                 const qa_addr = S.data_base + O.DATA_BASE_QA_FLAGS;
                 const ut_addr = S.data_base + O.DATA_BASE_UTOKEN_FLAGS;
-
-                /* BORROWED PROFILE: PROVE THE ADDRESSES BEFORE WRITING THEM.
-                 *
-                 * The four writes below go to data_base + a per-firmware offset. A firmware
-                 * with its own RE'd profile is left completely alone - same reads, same
-                 * writes, same order - because those are the ones known to work.
-                 *
-                 * A firmware that BORROWS another minor's profile is the risk: if
-                 * security_flags moved between the two kernels, all four addresses are wrong
-                 * and the writes corrupt unrelated kernel data. The pmap/dmap check above
-                 * only proves DATA_BASE_KERNEL_PMAP_STORE; DATA_BASE_SECURITY_FLAGS is a
-                 * separate offset and can be wrong on its own.
-                 *
-                 * This adds NO new kernel address: sf_addr and tid_addr are both read by the
-                 * code below anyway. It only moves the reads ahead of the writes and checks
-                 * that what comes back looks like the security-flags block. If it does not,
-                 * skip the writes and return - the same thing the pmap/dmap check does. The
-                 * jailbreak and elfldr carry on; only the debug menu is given up. */
-                if (O.OFFSETS_BORROWED) {
-                    const p_sf = kernel.read_dword(sf_addr);
-                    const p_tid = kernel.read_byte(tid_addr);
-                    // target_id is a small enumerated byte (0x80..0x83 across kit types) and
-                    // security_flags is a narrow bitfield, so a wrong address shows up as a
-                    // byte outside that range, or as high bits set / an unmapped 0xFFFFFFFF.
-                    const plausible = (p_tid >= 0x80n && p_tid <= 0x8Fn)
-                        && p_sf !== 0xFFFFFFFFn && (p_sf >> 16n) === 0n;
-                    await ulog("stage_debug: FW " + FW_VERSION + " has no kernel profile of"
-                        + " its own, borrowing " + O.OFFSETS_SOURCE + " - probe target_id="
-                        + toHex(p_tid) + " security_flags=" + toHex(p_sf)
-                        + (plausible ? " => looks right, proceeding" : " => WRONG"));
-                    if (!plausible) {
-                        await ulog("stage_debug: SKIPPING the 4 kernel writes for FW "
-                            + FW_VERSION + " - " + O.OFFSETS_SOURCE + "'s offsets do not"
-                            + " match this kernel and writing them would corrupt kernel data."
-                            + " Jailbreak and elfldr continue; the debug menu is not enabled."
-                            + " Fix by RE'ing DATA_BASE_ALLPROC/SECURITY_FLAGS/"
-                            + "KERNEL_PMAP_STORE/GVMSPACE from the " + FW_VERSION
-                            + " kernel and adding FW_OFFSETS_P2JB[\"" + FW_VERSION + "\"].");
-                        return;
-                    }
-                }
 
                 const sf0 = kernel.read_dword(sf_addr);
                 await ulog("stage_debug: security_flags before=" + toHex(sf0));

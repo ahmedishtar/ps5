@@ -8685,10 +8685,45 @@ export function makePoopsEngine(X) {
     for (let i = 0; i < getpidTail.length; ++i)
       binBytes[0x10fb + i] = getpidTail[i];
     for (let i = 0x1101; i < 0x1106; ++i) binBytes[i] = 0x90;
+    /* ELFLDR-WINDOW LOG CALLS -> NOP.  (kernel-panic fix)
+     *
+     * The blob calls the same logging helper from three sites:
+     *     0x126D  e8 3ef6ffff -> 0x8B0
+     *     0x12AD  e8 fef5ffff -> 0x8B0
+     *     0x3BC2  e8 e9ccffff -> 0x8B0
+     * and 0x8B0 opens
+     *     push rbp ; mov rbp,rsp ; push r14 ; push rbx ; sub rsp, 0xD00
+     * i.e. a 3,328-byte frame. On the elfldr kernel thread that overruns the
+     * stack guard and the box dies with `vm_fault: fault on nofault entry` --
+     * a kernel panic, not a userland crash. slopkit NOPs these; our blob kept
+     * them.
+     *
+     * This fix already exists on the P2JB path (p2jb.js kexp_patch_resolver)
+     * but was never ported here, so every POOPSPLOIT run -- the whole
+     * 7.00-12.00 range -- still executed the blob with all three calls live.
+     * That is why a 10.20 console panics while 12.70 (which goes through
+     * p2jb.js) does not.
+     *
+     * Guarded three ways so it can only ever be a no-op if something differs:
+     *   - each site must still start with E8 (call rel32) before it is touched
+     *   - patching 5 bytes to 0x90 keeps the instruction stream length identical
+     *   - the count is reported, so 3/3 vs 0/3 is visible in the log
+     * The logging helper's only job is diagnostics; skipping it changes no
+     * kernel state the exploit depends on.
+     */
+    const KEXP_LOG_CALLS = [0x126d, 0x12ad, 0x3bc2];
+    let logNopped = 0;
+    for (const off of KEXP_LOG_CALLS) {
+      if (binBytes[off] !== 0xe8) continue;
+      for (let i = 0; i < 5; ++i) binBytes[off + i] = 0x90;
+      ++logNopped;
+    }
+
     flushMark(
       "STAGE5-RESOLVER-BYPASS",
       "payload=618f4b12-slots=11-getpid=" + hx(getpidAddress) +
-        "-dlsym-syscall-calls-skipped=12",
+        "-dlsym-syscall-calls-skipped=12" +
+        "-elfldr-log-calls-NOPed=" + logNopped + "/3",
     );
 
     const size = binBytes.length;
